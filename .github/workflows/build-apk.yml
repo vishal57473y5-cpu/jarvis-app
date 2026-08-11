@@ -35,16 +35,13 @@ jobs:
             --platforms android \
             scaffold
 
-      - name: Copy app code and pubspec
+      - name: Copy app code
         run: |
           cp pubspec.yaml scaffold/pubspec.yaml
 
           rm -rf scaffold/lib
           cp -r lib scaffold/lib
 
-      # IMPORTANT:
-      # geolocator_android 4.6.2 has compatibility problems
-      # with Flutter 3.24.x. Force 4.6.1.
       - name: Fix dependency versions
         working-directory: scaffold
         run: |
@@ -54,7 +51,7 @@ jobs:
             geolocator_android: 4.6.1
           EOF
 
-      - name: Configure Android SDK 36
+      - name: Configure Android SDK
         working-directory: scaffold
         run: |
           python3 - <<'PY'
@@ -64,56 +61,148 @@ jobs:
           path = Path("android/app/build.gradle")
           content = path.read_text()
 
-          # compile SDK
-          content = re.sub(
-              r'compileSdk\s+flutter\.compileSdkVersion',
-              'compileSdk 36',
-              content
+          # Flutter SDK references -> fixed Android SDK values
+          content = content.replace(
+              "compileSdk flutter.compileSdkVersion",
+              "compileSdk 36"
           )
 
-          content = re.sub(
-              r'compileSdkVersion\s+flutter\.compileSdkVersion',
-              'compileSdkVersion 36',
-              content
+          content = content.replace(
+              "compileSdkVersion flutter.compileSdkVersion",
+              "compileSdkVersion 36"
           )
 
-          # target SDK
-          content = re.sub(
-              r'targetSdk\s+flutter\.targetSdkVersion',
-              'targetSdk 36',
-              content
+          content = content.replace(
+              "targetSdk flutter.targetSdkVersion",
+              "targetSdk 36"
           )
 
-          content = re.sub(
-              r'targetSdkVersion\s+flutter\.targetSdkVersion',
-              'targetSdkVersion 36',
-              content
+          content = content.replace(
+              "targetSdkVersion flutter.targetSdkVersion",
+              "targetSdkVersion 36"
           )
 
-          # Minimum Android version
-          content = re.sub(
-              r'minSdk\s+flutter\.minSdkVersion',
-              'minSdk 21',
-              content
+          content = content.replace(
+              "minSdk flutter.minSdkVersion",
+              "minSdk 21"
           )
 
-          content = re.sub(
-              r'minSdkVersion\s+flutter\.minSdkVersion',
-              'minSdkVersion 21',
-              content
+          content = content.replace(
+              "minSdkVersion flutter.minSdkVersion",
+              "minSdkVersion 21"
           )
 
           path.write_text(content)
 
-          print("Android SDK configuration updated")
+          print("Android app SDK configured")
           PY
 
       - name: Install Android SDK 36
         run: |
           yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
           ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager \
             "platforms;android-36" \
             "build-tools;36.0.0"
+
+      - name: Get Flutter packages
+        working-directory: scaffold
+        run: |
+          flutter pub get
+
+      # IMPORTANT:
+      # Patch old Flutter SDK references inside plugin Gradle files.
+      - name: Fix Android plugin Gradle files
+        working-directory: scaffold
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          pub_cache = Path.home() / ".pub-cache" / "hosted" / "pub.dev"
+
+          print("Scanning Flutter plugins...")
+
+          if not pub_cache.exists():
+              print("Pub cache not found")
+              raise SystemExit(0)
+
+          count = 0
+
+          for gradle in pub_cache.glob("*/android/*.gradle"):
+              try:
+                  content = gradle.read_text()
+
+                  original = content
+
+                  # Old Flutter SDK references
+                  content = content.replace(
+                      "compileSdkVersion flutter.compileSdkVersion",
+                      "compileSdkVersion 36"
+                  )
+
+                  content = content.replace(
+                      "compileSdk flutter.compileSdkVersion",
+                      "compileSdk 36"
+                  )
+
+                  content = content.replace(
+                      "targetSdkVersion flutter.targetSdkVersion",
+                      "targetSdkVersion 36"
+                  )
+
+                  content = content.replace(
+                      "targetSdk flutter.targetSdkVersion",
+                      "targetSdk 36"
+                  )
+
+                  content = content.replace(
+                      "minSdkVersion flutter.minSdkVersion",
+                      "minSdkVersion 21"
+                  )
+
+                  content = content.replace(
+                      "minSdk flutter.minSdkVersion",
+                      "minSdk 21"
+                  )
+
+                  # Old Flutter version variables
+                  content = content.replace(
+                      "flutterVersionCode.toInteger()",
+                      "1"
+                  )
+
+                  content = content.replace(
+                      "flutterVersionName",
+                      '"1.0.0"'
+                  )
+
+                  if content != original:
+                      gradle.write_text(content)
+                      print(f"Patched: {gradle}")
+                      count += 1
+
+              except Exception as e:
+                  print(f"Skipped {gradle}: {e}")
+
+          print(f"Total patched plugin Gradle files: {count}")
+          PY
+
+      - name: Show important dependencies
+        working-directory: scaffold
+        run: |
+          flutter pub deps | grep -E \
+            "geolocator|speech_to_text|flutter_tts" || true
+
+      - name: Clean Flutter
+        working-directory: scaffold
+        run: |
+          flutter clean
+
+      - name: Get packages again
+        working-directory: scaffold
+        run: |
+          flutter pub get
 
       - name: Add Android permissions
         run: |
@@ -136,7 +225,11 @@ jobs:
           ]
 
           for permission in permissions:
-              line = f'    <uses-permission android:name="{permission}"/>'
+
+              line = (
+                  f'    <uses-permission '
+                  f'android:name="{permission}"/>'
+              )
 
               if permission not in content:
                   content = re.sub(
@@ -148,23 +241,8 @@ jobs:
 
           path.write_text(content)
 
-          print("Permissions added successfully")
+          print("Android permissions configured")
           PY
-
-      - name: Clean project
-        working-directory: scaffold
-        run: |
-          flutter clean
-
-      - name: Get packages
-        working-directory: scaffold
-        run: |
-          flutter pub get
-
-      - name: Verify dependencies
-        working-directory: scaffold
-        run: |
-          flutter pub deps
 
       - name: Build release APK
         working-directory: scaffold
