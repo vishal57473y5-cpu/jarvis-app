@@ -2,12 +2,15 @@ name: Build JARVIS APK
 
 on:
   push:
-    branches: [ main, master ]
-  workflow_dispatch: {}
+    branches:
+      - main
+      - master
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -15,40 +18,135 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.0'
-          channel: 'stable'
+          flutter-version: "3.24.0"
+          channel: stable
+          cache: true
 
-      - name: Scaffold a fresh Flutter Android project
-        run: flutter create --org com.jarvis --project-name jarvis_app --platforms android scaffold
+      - name: Check Flutter
+        run: |
+          flutter --version
+          flutter doctor -v
 
-      - name: Inject app code into the scaffold
+      - name: Create fresh Flutter Android project
+        run: |
+          flutter create \
+            --org com.jarvis \
+            --project-name jarvis_app \
+            --platforms android \
+            scaffold
+
+      - name: Inject app code
         run: |
           cp pubspec.yaml scaffold/pubspec.yaml
+
           rm -rf scaffold/lib
           cp -r lib scaffold/lib
 
+      - name: Fix Android Gradle configuration
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("scaffold/android/build.gradle")
+          content = path.read_text()
+
+          # Add Android SDK versions for older plugins such as geolocator_android
+          if "compileSdkVersion" not in content:
+              content = content.replace(
+                  "buildscript {",
+                  """buildscript {
+              ext {
+                  compileSdkVersion = 34
+                  targetSdkVersion = 34
+                  minSdkVersion = 21
+              }
+          """,
+                  1
+              )
+
+          path.write_text(content)
+          print("Updated android/build.gradle")
+          PY
+
+      - name: Set compileSdk in app
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("scaffold/android/app/build.gradle")
+          content = path.read_text()
+
+          # Make sure compileSdk is explicitly defined
+          content = re.sub(
+              r'compileSdk\s+flutter\.compileSdkVersion',
+              'compileSdk 34',
+              content
+          )
+
+          # Older Flutter templates may use compileSdkVersion
+          content = re.sub(
+              r'compileSdkVersion\s+flutter\.compileSdkVersion',
+              'compileSdkVersion 34',
+              content
+          )
+
+          # Ensure target SDK
+          content = re.sub(
+              r'targetSdk\s+flutter\.targetSdkVersion',
+              'targetSdk 34',
+              content
+          )
+
+          path.write_text(content)
+          print("Updated app/build.gradle")
+          PY
+
       - name: Add required Android permissions
         run: |
-          python3 - <<'EOF'
+          python3 - <<'PY'
+          from pathlib import Path
           import re
-          path = "scaffold/android/app/src/main/AndroidManifest.xml"
-          with open(path) as f:
-              content = f.read()
-          perms = (
-              '\n    <uses-permission android:name="android.permission.INTERNET"/>'
-              '\n    <uses-permission android:name="android.permission.RECORD_AUDIO"/>'
-              '\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>'
-              '\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>'
-              '\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>'
+
+          path = Path(
+              "scaffold/android/app/src/main/AndroidManifest.xml"
           )
-          content = re.sub(r'(<manifest[^>]*>)', r'\1' + perms, content, count=1)
-          with open(path, "w") as f:
-              f.write(content)
-          EOF
+
+          content = path.read_text()
+
+          permissions = [
+              "android.permission.INTERNET",
+              "android.permission.RECORD_AUDIO",
+              "android.permission.POST_NOTIFICATIONS",
+              "android.permission.ACCESS_FINE_LOCATION",
+              "android.permission.ACCESS_COARSE_LOCATION",
+          ]
+
+          for permission in permissions:
+              line = f'    <uses-permission android:name="{permission}"/>'
+
+              if permission not in content:
+                  content = re.sub(
+                      r'(<manifest[^>]*>)',
+                      r'\1\n' + line,
+                      content,
+                      count=1
+                  )
+
+          path.write_text(content)
+          print("Android permissions added")
+
+      - name: Clean Flutter
+        working-directory: scaffold
+        run: flutter clean
 
       - name: Get packages
         working-directory: scaffold
         run: flutter pub get
+
+      - name: Check dependencies
+        working-directory: scaffold
+        run: flutter pub deps
 
       - name: Build release APK
         working-directory: scaffold
@@ -59,3 +157,4 @@ jobs:
         with:
           name: jarvis-apk
           path: scaffold/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
