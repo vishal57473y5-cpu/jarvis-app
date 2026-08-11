@@ -38,7 +38,6 @@ jobs:
       - name: Copy app code
         run: |
           cp pubspec.yaml scaffold/pubspec.yaml
-
           rm -rf scaffold/lib
           cp -r lib scaffold/lib
 
@@ -49,7 +48,7 @@ jobs:
 
           dependency_overrides:
             geolocator_android: 4.6.1
-            speech_to_text: 7.4.0
+            speech_to_text: 7.3.0
           EOF
 
       - name: Configure Android SDK 36
@@ -57,7 +56,6 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
 
           path = Path("android/app/build.gradle")
           content = path.read_text()
@@ -76,7 +74,7 @@ jobs:
 
           path.write_text(content)
 
-          print("Android app configured for SDK 36")
+          print("Android SDK configuration completed.")
           PY
 
       - name: Install Android SDK 36
@@ -92,88 +90,12 @@ jobs:
         run: |
           flutter pub get
 
-      - name: Patch ALL Flutter plugin Gradle files
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          pub_cache = (
-              Path.home()
-              / ".pub-cache"
-              / "hosted"
-              / "pub.dev"
-          )
-
-          print("======================================")
-          print("Scanning Flutter plugin Gradle files")
-          print("======================================")
-
-          if not pub_cache.exists():
-              raise SystemExit("Pub cache not found")
-
-          patched = 0
-
-          for path in pub_cache.rglob("*.gradle"):
-
-              try:
-                  content = path.read_text()
-              except Exception:
-                  continue
-
-              original = content
-
-              # Flutter SDK references
-              content = content.replace(
-                  "flutter.compileSdkVersion",
-                  "36"
-              )
-
-              content = content.replace(
-                  "flutter.targetSdkVersion",
-                  "36"
-              )
-
-              content = content.replace(
-                  "flutter.minSdkVersion",
-                  "21"
-              )
-
-              content = content.replace(
-                  "flutterVersionCode.toInteger()",
-                  "1"
-              )
-
-              content = content.replace(
-                  "flutterVersionName",
-                  '"1.0.0"'
-              )
-
-              if content != original:
-                  path.write_text(content)
-
-                  print(f"PATCHED: {path}")
-                  patched += 1
-
-          print("======================================")
-          print(f"Total patched files: {patched}")
-          print("======================================")
-          PY
-
-      - name: Verify speech_to_text
+      - name: Verify dependency versions
         working-directory: scaffold
         run: |
-          echo "Checking speech_to_text..."
-          flutter pub deps | grep -E "speech_to_text|geolocator" || true
-
-      - name: Verify plugin Gradle files
-        run: |
-          echo "Searching remaining Flutter SDK references..."
-
-          grep -R \
-            "flutter.compileSdkVersion\|flutter.minSdkVersion\|flutter.targetSdkVersion" \
-            "$HOME/.pub-cache/hosted/pub.dev" \
-            --include="*.gradle" \
-            || true
+          echo "Checking installed packages..."
+          flutter pub deps | grep -E \
+            "speech_to_text|geolocator_android|flutter_tts" || true
 
       - name: Add Android permissions
         run: |
@@ -192,7 +114,7 @@ jobs:
               "android.permission.RECORD_AUDIO",
               "android.permission.POST_NOTIFICATIONS",
               "android.permission.ACCESS_FINE_LOCATION",
-              "android.permission.ACCESS_COARSE_LOCATION",
+              "android.permission.ACCESS_COARSE_LOCATION"
           ]
 
           for permission in permissions:
@@ -212,13 +134,18 @@ jobs:
 
           path.write_text(content)
 
-          print("Android permissions added")
+          print("Android permissions added successfully.")
           PY
 
       - name: Clean Flutter
         working-directory: scaffold
         run: |
           flutter clean
+
+      - name: Get packages again
+        working-directory: scaffold
+        run: |
+          flutter pub get
 
       - name: Build release APK
         working-directory: scaffold
