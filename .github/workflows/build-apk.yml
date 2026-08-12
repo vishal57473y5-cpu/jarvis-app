@@ -2,15 +2,12 @@ name: Build JARVIS APK
 
 on:
   push:
-    branches:
-      - main
-      - master
-  workflow_dispatch:
+    branches: [ main, master ]
+  workflow_dispatch: {}
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -18,200 +15,47 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.29.2"
-          channel: stable
-          cache: true
+          flutter-version: '3.24.0'
+          channel: 'stable'
 
-      - name: Check Flutter
-        run: |
-          flutter --version
-          dart --version
-          flutter doctor -v
+      - name: Scaffold a fresh Flutter Android project
+        run: flutter create --org com.jarvis --project-name jarvis_app --platforms android scaffold
 
-      - name: Create fresh Flutter Android project
-        run: |
-          flutter create \
-            --org com.jarvis \
-            --project-name jarvis_app \
-            --platforms android \
-            scaffold
-
-      - name: Copy app code
+      - name: Inject app code into the scaffold
         run: |
           cp pubspec.yaml scaffold/pubspec.yaml
-
           rm -rf scaffold/lib
           cp -r lib scaffold/lib
 
-      - name: Fix dependencies
-        working-directory: scaffold
+      - name: Add required Android permissions
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path("pubspec.yaml")
-          content = path.read_text()
-
-          # Remove old dependency_overrides if already present
-          lines = content.splitlines()
-          result = []
-          skip = False
-
-          for line in lines:
-              if line.startswith("dependency_overrides:"):
-                  skip = True
-                  continue
-
-              if skip:
-                  if line and not line.startswith(" "):
-                      skip = False
-                      result.append(line)
-                  continue
-
-              result.append(line)
-
-          content = "\n".join(result) + "\n"
-
-          content += """
-          dependency_overrides:
-            geolocator_android: 4.6.1
-          """
-
-          path.write_text(content)
-
-          print("Dependencies configured")
-          PY
-
-      - name: Configure Android SDK
-        working-directory: scaffold
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
+          python3 - <<'EOF'
           import re
-
-          path = Path("android/app/build.gradle")
-          content = path.read_text()
-
-          # Flutter generated project
-          content = content.replace(
-              "compileSdk = flutter.compileSdkVersion",
-              "compileSdk = 36"
+          path = "scaffold/android/app/src/main/AndroidManifest.xml"
+          with open(path) as f:
+              content = f.read()
+          perms = (
+              '\n    <uses-permission android:name="android.permission.INTERNET"/>'
+              '\n    <uses-permission android:name="android.permission.RECORD_AUDIO"/>'
+              '\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>'
+              '\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>'
+              '\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>'
           )
-
-          content = content.replace(
-              "compileSdk flutter.compileSdkVersion",
-              "compileSdk 36"
-          )
-
-          content = content.replace(
-              "compileSdkVersion flutter.compileSdkVersion",
-              "compileSdkVersion 36"
-          )
-
-          content = content.replace(
-              "targetSdk = flutter.targetSdkVersion",
-              "targetSdk = 36"
-          )
-
-          content = content.replace(
-              "targetSdk flutter.targetSdkVersion",
-              "targetSdk 36"
-          )
-
-          content = content.replace(
-              "targetSdkVersion flutter.targetSdkVersion",
-              "targetSdkVersion 36"
-          )
-
-          content = content.replace(
-              "minSdk = flutter.minSdkVersion",
-              "minSdk = 21"
-          )
-
-          content = content.replace(
-              "minSdk flutter.minSdkVersion",
-              "minSdk 21"
-          )
-
-          content = content.replace(
-              "minSdkVersion flutter.minSdkVersion",
-              "minSdkVersion 21"
-          )
-
-          path.write_text(content)
-
-          print("Android SDK set to 36")
-          PY
-
-      - name: Install Android SDK 36
-        run: |
-          yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses || true
-
-          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager \
-            "platforms;android-36" \
-            "build-tools;36.0.0"
+          content = re.sub(r'(<manifest[^>]*>)', r'\1' + perms, content, count=1)
+          with open(path, "w") as f:
+              f.write(content)
+          EOF
 
       - name: Get packages
         working-directory: scaffold
-        run: |
-          flutter clean
-          flutter pub get
+        run: flutter pub get
 
-      - name: Check dependency tree
+      - name: Build release APK
         working-directory: scaffold
-        run: |
-          flutter pub deps
+        run: flutter build apk --release
 
-      - name: Fix Android Manifest
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          path = Path(
-              "scaffold/android/app/src/main/AndroidManifest.xml"
-          )
-
-          content = path.read_text()
-
-          permissions = [
-              "android.permission.INTERNET",
-              "android.permission.RECORD_AUDIO",
-              "android.permission.POST_NOTIFICATIONS",
-              "android.permission.ACCESS_FINE_LOCATION",
-              "android.permission.ACCESS_COARSE_LOCATION",
-              "android.permission.BLUETOOTH",
-              "android.permission.BLUETOOTH_ADMIN",
-              "android.permission.BLUETOOTH_CONNECT"
-          ]
-
-          for permission in permissions:
-              if permission not in content:
-                  permission_line = (
-                      f'    <uses-permission '
-                      f'android:name="{permission}"/>'
-                  )
-
-                  content = re.sub(
-                      r'(<manifest[^>]*>)',
-                      r'\1\n' + permission_line,
-                      content,
-                      count=1
-                  )
-
-          path.write_text(content)
-
-          print("Android permissions configured")
-          PY
-
-      - name: Build APK
-        working-directory: scaffold
-        run: |
-          flutter build apk --release --verbose
-
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: jarvis-apk
           path: scaffold/build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
