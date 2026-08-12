@@ -17,7 +17,6 @@ dependencies:
   timezone: ^0.9.4
   flutter_timezone: ^2.0.1
   url_launcher: ^6.3.0
-  geolocator: ^11.0.0
   android_intent_plus: ^5.1.0
 
 dev_dependencies:
