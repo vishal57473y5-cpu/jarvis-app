@@ -10,7 +10,6 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:android_intent_plus/flag.dart';
 
@@ -272,35 +271,10 @@ class _HomeScreenState extends State<HomeScreen> {
   };
 
   Future<void> _loadWeatherByLocation() async {
-    try {
-      final perm = await Geolocator.checkPermission();
-      LocationPermission p = perm;
-      if (p == LocationPermission.denied) {
-        p = await Geolocator.requestPermission();
-      }
-      if (p == LocationPermission.denied ||
-          p == LocationPermission.deniedForever) {
-        await _renderWeather(13.0827, 80.2707, 'Chennai, India (default)');
-        return;
-      }
-      final pos = await Geolocator.getCurrentPosition();
-      final label = await _reverseGeocode(pos.latitude, pos.longitude);
-      await _renderWeather(pos.latitude, pos.longitude, label);
-    } catch (_) {
-      await _renderWeather(13.0827, 80.2707, 'Chennai, India (default)');
-    }
-  }
-
-  Future<String> _reverseGeocode(double lat, double lon) async {
-    try {
-      final r = await http.get(Uri.parse(
-          'https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=$lat&longitude=$lon&localityLanguage=en'));
-      final d = jsonDecode(r.body);
-      final city = d['city'] ?? d['locality'];
-      final country = d['countryName'];
-      if (city != null) return '$city, ${country ?? ''}';
-    } catch (_) {}
-    return 'Your location';
+    // GPS-based location removed to avoid a build-tooling conflict with
+    // geolocator_android. Defaults to a fixed city — use the "Search a
+    // city…" box in the Weather panel for anywhere else.
+    await _renderWeather(13.0827, 80.2707, 'Chennai, India (default)');
   }
 
   Future<void> _renderWeather(double lat, double lon, String label) async {
