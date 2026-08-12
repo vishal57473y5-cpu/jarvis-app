@@ -15,7 +15,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.5'
+          flutter-version: '3.22.2'
           channel: 'stable'
 
       - name: Scaffold a fresh Flutter Android project
@@ -49,6 +49,14 @@ jobs:
       - name: Get packages
         working-directory: scaffold
         run: flutter pub get
+
+      - name: Patch all plugin build.gradle files (fixes compileSdkVersion resolution)
+        run: |
+          find "$HOME/.pub-cache" -path "*/android/build.gradle" -print0 | \
+          xargs -0 sed -i \
+            -e 's/compileSdkVersion flutter\.compileSdkVersion/compileSdkVersion 34/g' \
+            -e 's/minSdkVersion flutter\.minSdkVersion/minSdkVersion 21/g' \
+            -e 's/targetSdkVersion flutter\.targetSdkVersion/targetSdkVersion 34/g'
 
       - name: Build release APK
         working-directory: scaffold
