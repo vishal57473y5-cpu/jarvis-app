@@ -15,7 +15,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.0'
+          flutter-version: '3.24.5'
           channel: 'stable'
 
       - name: Scaffold a fresh Flutter Android project
@@ -26,6 +26,21 @@ jobs:
           cp pubspec.yaml scaffold/pubspec.yaml
           rm -rf scaffold/lib
           cp -r lib scaffold/lib
+
+      - name: Set compileSdk / AGP versions explicitly
+        run: |
+          python3 - <<'EOF'
+          import re
+          path = "scaffold/android/settings.gradle.kts"
+          with open(path) as f:
+              content = f.read()
+          # Pin a known-good Android Gradle Plugin version so plugin builds
+          # (geolocator_android etc.) always find compileSdkVersion correctly.
+          content = re.sub(r'id\("com\.android\.application"\) version "[^"]+"',
+                            'id("com.android.application") version "8.3.0"', content)
+          with open(path, "w") as f:
+              f.write(content)
+          EOF
 
       - name: Add required Android permissions
         run: |
